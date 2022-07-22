@@ -1,0 +1,67 @@
+defaults:
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+
+# Training settings.-------------------------------------------------------
+num_workers: 4
+restart: False
+start_epoch: 0
+num_epoch: 10
+repeats: 1
+arch: 'resnet18'
+pretrain: True
+res: 320 # Input size
+res1: 320 # Input size scale from
+res2: 640 # Input size scale to
+batch_size_cluster: 256
+batch_size_train: 128
+batch_size_test: 128
+lr: 1e-4
+weight_decay: 0
+momentum: 0.9
+optim_type: 'Adam'
+num_init_batches: 20
+num_batches: 1
+kmeans_n_iter: 20
+in_dim: 128
+X: 80
+# evaluation settings.------------------------------------------------------
+eval_only: False
+eval_path: ''
+# Loss settings.------------------------------------------------------------
+metric_train: 'cosine'
+metric_test: 'cosine'
+K_train: 27
+K_test: 27
+no_balance: False
+mse: False
+
+# Datasets settings.-------------------------------------------------------
+augment: True
+equiv: True
+min_scale: 0.5
+jitter: True
+grey: True
+blur: True
+h_flip: True
+v_flip: False
+random_crop: True
+val_type: 'train'
+version: 7
+# Cocostuff:----------------------------------------------------------------
+stuff: True
+thing: True
+fullcoco: False
+# Cityscapes:---------------------------------------------------------------
+cityscapes: False
+label_mode: gtFine
+long_image: False
+
+# environment settings.----------------------------------------------------
+seed: 1
+data_root: 'datasets/coco'
+save_root: 'results/picie/train/${seed}'
+save_model_path: ''
+save_eval_path: ''
+restart_path: ''
+comment: ''

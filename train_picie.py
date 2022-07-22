@@ -9,7 +9,11 @@ import torch.nn.functional as F
 
 from utils import *
 from commons import * 
-from modules import fpn 
+from modules import fpn
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
+import logging
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -170,7 +174,32 @@ def adjust_learning_rate(optimizer, epoch, args):
         param_group['lr'] = lr
 
 
-def main(args, logger):
+@hydra.main(version_base=None, config_path='conf', config_name='train')
+def main(args: DictConfig) -> None:
+    os.makedirs(os.path.join(args.save_root), exist_ok=True)
+    if not args.pretrain:
+        args.save_root += '/scratch'
+    if args.augment:
+        args.save_root += '/augmented/res1={}_res2={}/jitter={}_blur={}_grey={}'.format(args.res1, args.res2,
+                                                                                        args.jitter, args.blur,
+                                                                                        args.grey)
+    if args.equiv:
+        args.save_root += '/equiv/h_flip={}_v_flip={}_crop={}/min_scale\={}'.format(args.h_flip, args.v_flip,
+                                                                                    args.random_crop, args.min_scale)
+    if args.no_balance:
+        args.save_root += '/no_balance'
+    if args.mse:
+        args.save_root += '/mse'
+
+    args.save_model_path = os.path.join(args.save_root, args.comment,
+                                        'K_train={}_{}'.format(args.K_train, args.metric_train))
+    args.save_eval_path = os.path.join(args.save_model_path, 'K_test={}_{}'.format(args.K_test, args.metric_test))
+
+    os.makedirs(args.save_eval_path, exist_ok=True)
+
+
+    # Setup logger.
+    logger = set_logger(os.path.join(args.save_eval_path, 'train.log'))
     logger.info(args)
 
     # Use random seed.
@@ -340,28 +369,5 @@ def main(args, logger):
         
         
 if __name__=='__main__':
-    args = parse_arguments()
-
-    # Setup the path to save.
-    if not args.pretrain:
-        args.save_root += '/scratch'
-    if args.augment:
-        args.save_root += '/augmented/res1={}_res2={}/jitter={}_blur={}_grey={}'.format(args.res1, args.res2, args.jitter, args.blur, args.grey)
-    if args.equiv:
-        args.save_root += '/equiv/h_flip={}_v_flip={}_crop={}/min_scale\={}'.format(args.h_flip, args.v_flip, args.random_crop, args.min_scale)
-    if args.no_balance:
-        args.save_root += '/no_balance'
-    if args.mse:
-        args.save_root += '/mse'
-
-    args.save_model_path = os.path.join(args.save_root, args.comment, 'K_train={}_{}'.format(args.K_train, args.metric_train))
-    args.save_eval_path  = os.path.join(args.save_model_path, 'K_test={}_{}'.format(args.K_test, args.metric_test))
-    
-    if not os.path.exists(args.save_eval_path):
-        os.makedirs(args.save_eval_path)
-
-    # Setup logger.
-    logger = set_logger(os.path.join(args.save_eval_path, 'train.log'))
-    
     # Start.
-    main(args, logger)
+    main()
