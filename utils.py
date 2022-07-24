@@ -31,9 +31,9 @@ def set_logger(log_path):
     logger.addHandler(file_handler)
 
     # Logging to console
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(logging.Formatter('%(message)s'))
-    logger.addHandler(stream_handler)
+    # stream_handler = logging.StreamHandler()
+    # stream_handler.setFormatter(logging.Formatter('%(message)s'))
+    # logger.addHandler(stream_handler)
 
     return logger
 
@@ -122,10 +122,9 @@ def get_result_metrics(histogram):
 
     return result
 
-def compute_negative_euclidean(featmap, centroids, metric_function):
-    centroids = centroids.unsqueeze(-1).unsqueeze(-1)
-    return - (1 - 2*metric_function(featmap)\
-                + (centroids*centroids).sum(dim=1).unsqueeze(0)) # negative l2 squared 
+def compute_negative_euclidean(featmap, centroids):
+    return - (1 - 2*torch.einsum('nc,bchw->bnhw', centroids, featmap)\
+                + (centroids*centroids).sum(dim=1).view(centroids.shape[0],1,1)) # negative l2 squared
 
 
 def get_metric_as_conv(centroids):
@@ -230,9 +229,9 @@ def postprocess_label(args, K, idx, idx_img, scores, n_dual):
     out = scores[idx].topk(1, dim=0)[1].flatten().detach().cpu().numpy()
 
     # Save labels. 
-    if not os.path.exists(os.path.join(args.save_model_path, 'label_' + str(n_dual))):
-        os.makedirs(os.path.join(args.save_model_path, 'label_' + str(n_dual)))
-    torch.save(out, os.path.join(args.save_model_path, 'label_' + str(n_dual), '{}.pkl'.format(idx_img)))
+    # if not os.path.exists(os.path.join(args.save_model_path, 'label_' + str(n_dual))):
+    #     os.makedirs(os.path.join(args.save_model_path, 'label_' + str(n_dual)))
+    # torch.save(out, os.path.join(args.save_model_path, 'label_' + str(n_dual), '{}.pkl'.format(idx_img)))
     
     # Count for re-weighting. 
     counts = torch.tensor(np.bincount(out, minlength=K)).float()
@@ -248,8 +247,8 @@ def eqv_transform_if_needed(args, dataloader, indice, input):
 
 
 def get_transform_params(args):
-    inv_list = []
-    eqv_list = []
+    inv_list = [] # photometric transformation.
+    eqv_list = [] # geometric transformation.
     if args.augment:
         if args.blur:
             inv_list.append('blur')
@@ -279,7 +278,7 @@ def collate_train(batch):
         return indice, image1, image2, label1, label2
     
     indice = [b[0] for b in batch]
-    image1 = torch.stack([b[1] for b in batch])
+    image1 = torch.stack([b[1] for b in batch])  # concatenates a sequence of tensors along the 0th dimension.
 
     return indice, image1
 

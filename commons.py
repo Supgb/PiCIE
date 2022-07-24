@@ -103,9 +103,8 @@ def run_mini_batch_kmeans(args, logger, dataloader, model, view):
                         kmeans_loss.update(D.mean())
                         logger.info('Initial k-means loss: {:.4f} '.format(kmeans_loss.avg))
                         
-                        # Compute counts for each cluster. 
-                        for k in np.unique(I):
-                            data_count[k] += len(np.where(I == k)[0])
+                        # Compute counts for each cluster.
+                        data_count += np.bincount(I.ravel().astype('int32'), minlength=args.K_train)
                         first_batch = False
                     else:
                         b_feat = torch.cat(featslist)
@@ -114,14 +113,16 @@ def run_mini_batch_kmeans(args, logger, dataloader, model, view):
 
                         kmeans_loss.update(D.mean())
 
-                        # Update centroids. 
-                        for k in np.unique(I):
-                            idx_k = np.where(I == k)[0]
-                            data_count[k] += len(idx_k)
-                            centroid_lr    = len(idx_k) / (data_count[k] + 1e-6)
-                            centroids[k]   = (1 - centroid_lr) * centroids[k] + centroid_lr * b_feat[idx_k].mean(0).numpy().astype('float32')
-                    
-                    # Empty. 
+                        # Update centroids.
+                        I = I.ravel()
+                        k_count = np.bincount(I.astype('int32'), minlength=args.K_train)
+                        data_count += k_count
+                        centroid_lr = (k_count / (data_count + 1e-6)).astype('float32')
+                        mean_feat = torch.stack([torch.mean(b_feat[I == k]) for k in range(args.K_train)])
+                        centroids = (1 - np.expand_dims(centroid_lr, 1)) * centroids + \
+                                    np.expand_dims(centroid_lr * mean_feat.numpy().astype('float32'), 1)
+
+                    # Empty.
                     featslist   = []
                     num_batches = args.num_init_batches - args.num_batches
 
@@ -146,7 +147,7 @@ def compute_labels(args, logger, dataloader, model, centroids, view):
     dataloader.dataset.view = view
 
     # Define metric function with conv layer. 
-    metric_function = get_metric_as_conv(centroids)
+    # metric_function = get_metric_as_conv(centroids)
 
     counts = torch.zeros(K, requires_grad=False).cpu()
     model.eval()
@@ -170,7 +171,7 @@ def compute_labels(args, logger, dataloader, model, centroids, view):
                 logger.info('Batch feature size : {}\n'.format(list(feats.shape)))
 
             # Compute distance and assign label. 
-            scores  = compute_negative_euclidean(feats, centroids, metric_function) 
+            scores  = compute_negative_euclidean(feats, centroids)
 
             # Save labels and count. 
             for idx, idx_img in enumerate(indice):
@@ -221,7 +222,7 @@ def evaluate(args, logger, dataloader, classifier, model):
 
     new_hist = np.zeros((args.K_test, args.K_test))
     for idx in range(args.K_test):
-        new_hist[m[idx, 1]] = histogram[idx]
+        new_hist[m[idx, 1]] = histogram[idx] # make the largest entry in the diagonal of new_hist.
     
     # NOTE: Now [new_hist] is re-ordered to 12 thing + 15 stuff classses. 
     res1 = get_result_metrics(new_hist)
