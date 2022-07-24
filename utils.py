@@ -147,13 +147,6 @@ def freeze_all(model):
         param.requires_grad = False 
 
 
-def initialize_classifier(args):
-    classifier = get_linear(args.in_dim, args.K_train)
-    classifier = nn.DataParallel(classifier)
-    classifier = classifier.cuda()
-
-    return classifier
-
 def get_linear(indim, outdim):
     classifier = nn.Conv2d(indim, outdim, kernel_size=1, stride=1, padding=0, bias=True)
     classifier.weight.data.normal_(0, 0.01)
@@ -171,6 +164,16 @@ def feature_flatten(feats):
             .contiguous().view(-1, feats.size(1))
     
     return feats 
+
+
+def batch_similarity2D(featmap: torch.Tensor, centroids: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the similarity between a batch of centroids and a batch of feature maps.
+     centriods: N x C
+     featmap: B x C x H x W
+     return B x N x H x W
+    """
+    return torch.einsum('bchw,nc->bnhw', featmap, centroids)
 
 ################################################################################
 #                                   Faiss related                              #
@@ -229,9 +232,9 @@ def postprocess_label(args, K, idx, idx_img, scores, n_dual):
     out = scores[idx].topk(1, dim=0)[1].flatten().detach().cpu().numpy()
 
     # Save labels. 
-    # if not os.path.exists(os.path.join(args.save_model_path, 'label_' + str(n_dual))):
-    #     os.makedirs(os.path.join(args.save_model_path, 'label_' + str(n_dual)))
-    # torch.save(out, os.path.join(args.save_model_path, 'label_' + str(n_dual), '{}.pkl'.format(idx_img)))
+    if not os.path.exists(os.path.join(args.save_model_path, 'label_' + str(n_dual))):
+        os.makedirs(os.path.join(args.save_model_path, 'label_' + str(n_dual)))
+    torch.save(out, os.path.join(args.save_model_path, 'label_' + str(n_dual), '{}.pkl'.format(idx_img)))
     
     # Count for re-weighting. 
     counts = torch.tensor(np.bincount(out, minlength=K)).float()

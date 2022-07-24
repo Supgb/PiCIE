@@ -85,7 +85,7 @@ def parse_arguments():
 
 
 
-def train(args, logger, dataloader, model, classifier1, classifier2, criterion1, criterion2, optimizer, epoch):
+def train(args, logger, dataloader, model, centroids1, centroids2, criterion1, criterion2, optimizer, epoch):
     losses = AverageMeter()
     losses_mse = AverageMeter()
     losses_cet = AverageMeter()
@@ -97,8 +97,6 @@ def train(args, logger, dataloader, model, classifier1, classifier2, criterion1,
     if args.mse:
         criterion_mse = torch.nn.MSELoss().cuda()
 
-    classifier1.eval()
-    classifier2.eval()
     for i, (indice, input1, input2, label1, label2) in enumerate(dataloader):
         input1 = eqv_transform_if_needed(args, dataloader, indice, input1.cuda(non_blocking=True))
         label1 = label1.cuda(non_blocking=True)
@@ -122,8 +120,8 @@ def train(args, logger, dataloader, model, classifier1, classifier2, criterion1,
         featmap21_processed, label21_processed = featmap2, label1.flatten()
 
         # Cross-view loss
-        output12 = feature_flatten(classifier2(featmap12_processed)) # NOTE: classifier2 is coupled with label2
-        output21 = feature_flatten(classifier1(featmap21_processed)) # NOTE: classifier1 is coupled with label1
+        output12 = feature_flatten(batch_similarity2D(featmap12_processed, centroids2)) # NOTE: centroids2 is coupled with label2
+        output21 = feature_flatten(batch_similarity2D(featmap21_processed, centroids1)) # NOTE: centroids1 is coupled with label1
         
         loss12  = criterion2(output12, label12_processed)
         loss21  = criterion1(output21, label21_processed)  
@@ -135,8 +133,8 @@ def train(args, logger, dataloader, model, classifier1, classifier2, criterion1,
         featmap22_processed, label22_processed = featmap2, label2.flatten()
         
         # Within-view loss
-        output11 = feature_flatten(classifier1(featmap11_processed)) # NOTE: classifier1 is coupled with label1
-        output22 = feature_flatten(classifier2(featmap22_processed)) # NOTE: classifier2 is coupled with label2
+        output11 = feature_flatten(batch_similarity2D(featmap11_processed, centroids1)) # NOTE: centroids1 is coupled with label1
+        output22 = feature_flatten(batch_similarity2D(featmap22_processed, centroids2)) # NOTE: centroids2 is coupled with label2
 
         loss11 = criterion1(output11, label11_processed)
         loss22 = criterion2(output22, label22_processed)
@@ -209,7 +207,7 @@ def main(args: DictConfig) -> None:
     t_start = t.time()
 
     # Get model and optimizer.
-    model, optimizer, classifier1 = get_model_and_optimizer(args, logger)
+    model, optimizer, centroids1 = get_model_and_optimizer(args, logger)
 
     # New trainset inside for-loop.
     inv_list, eqv_list = get_transform_params(args)
@@ -232,7 +230,7 @@ def main(args: DictConfig) -> None:
                                              worker_init_fn=worker_init_fn(args.seed))
     
     # Before train.
-    _, _ = evaluate(args, logger, testloader, classifier1, model)
+    _, _ = evaluate(args, logger, testloader, centroids1, model)
     
     if not args.eval_only:
         # Train start.
@@ -265,18 +263,6 @@ def main(args: DictConfig) -> None:
                 criterion1 = torch.nn.CrossEntropyLoss().cuda()
                 criterion2 = torch.nn.CrossEntropyLoss().cuda()
 
-            # Setup nonparametric classifier.
-            classifier1 = initialize_classifier(args)
-            classifier2 = initialize_classifier(args)
-            classifier1.module.weight.data = centroids1.unsqueeze(-1).unsqueeze(-1)
-            classifier2.module.weight.data = centroids2.unsqueeze(-1).unsqueeze(-1)
-            freeze_all(classifier1)
-            freeze_all(classifier2)
-
-            # Delete since no longer needed. 
-            del centroids1 
-            del centroids2
-
             # Set-up train loader.
             trainset.mode  = 'train'
             trainloader_loop  = torch.utils.data.DataLoader(trainset, 
@@ -288,9 +274,9 @@ def main(args: DictConfig) -> None:
                                                             worker_init_fn=worker_init_fn(args.seed))
 
             logger.info('Start training ...')
-            train_loss, train_cet, cet_within, cet_across, train_mse = train(args, logger, trainloader_loop, model, classifier1, classifier2, criterion1, criterion2, optimizer, epoch) 
-            acc1, res1 = evaluate(args, logger, testloader, classifier1, model)
-            acc2, res2 = evaluate(args, logger, testloader, classifier2, model)
+            train_loss, train_cet, cet_within, cet_across, train_mse = train(args, logger, trainloader_loop, model, centroids1, centroids2, criterion1, criterion2, optimizer, epoch)
+            acc1, res1 = evaluate(args, logger, testloader, centroids1, model)
+            acc2, res2 = evaluate(args, logger, testloader, centroids2, model)
             
             logger.info('============== Epoch [{}] =============='.format(epoch))
             logger.info('  Time: [{}]'.format(get_datetime(int(t.time())-int(t1))))
@@ -306,8 +292,8 @@ def main(args: DictConfig) -> None:
             torch.save({'epoch': epoch+1, 
                         'args' : args,
                         'state_dict': model.state_dict(),
-                        'classifier1_state_dict' : classifier1.state_dict(),
-                        'classifier2_state_dict' : classifier2.state_dict(),
+                        'centroids1' : centroids1,
+                        'centroids2' : centroids2,
                         'optimizer' : optimizer.state_dict(),
                         },
                         os.path.join(args.save_model_path, 'checkpoint_{}.pth.tar'.format(epoch)))
@@ -315,8 +301,8 @@ def main(args: DictConfig) -> None:
             torch.save({'epoch': epoch+1, 
                         'args' : args,
                         'state_dict': model.state_dict(),
-                        'classifier1_state_dict' : classifier1.state_dict(),
-                        'classifier2_state_dict' : classifier2.state_dict(),
+                        'centriods1' : centroids1,
+                        'centroids2' : centroids2,
                         'optimizer' : optimizer.state_dict(),
                         },
                         os.path.join(args.save_model_path, 'checkpoint.pth.tar'))
@@ -350,15 +336,11 @@ def main(args: DictConfig) -> None:
                 centroids1, kmloss1 = run_mini_batch_kmeans(args, logger, trainloader, model, view=-1)
                 logger.info('-Centroids ready. [Loss: {:.5f}/ Time: {}]\n'.format(kmloss1, get_datetime(int(t.time())-int(t1))))
                 
-                classifier1 = initialize_classifier(args)
-                classifier1.module.weight.data = centroids1.unsqueeze(-1).unsqueeze(-1)
-                freeze_all(classifier1)
-                
-                acc_new, res_new = evaluate(args, logger, testloader, classifier1, model)
+                acc_new, res_new = evaluate(args, logger, testloader, centroids1, model)
                 acc_list_new.append(acc_new)
                 res_list_new.append(res_new)
         else:
-            acc_new, res_new = evaluate(args, logger, testloader, classifier1, model)
+            acc_new, res_new = evaluate(args, logger, testloader, centroids1, model)
             acc_list_new.append(acc_new)
             res_list_new.append(res_new)
 

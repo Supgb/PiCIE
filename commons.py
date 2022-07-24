@@ -15,10 +15,8 @@ def get_model_and_optimizer(args, logger):
     model = fpn.PanopticFPN(args)
     model = nn.DataParallel(model)
     model = model.cuda()
-
-    # Init classifier (for eval only.)
-    classifier = initialize_classifier(args)
-
+    # Init centroids.
+    centroids = torch.normal(0, 0.01, size=(args.K_train, args.in_dim), requires_grad=False).cuda()
     # Init optimizer 
     if args.optim_type == 'SGD':
         logger.info('SGD optimizer is used.')
@@ -27,6 +25,8 @@ def get_model_and_optimizer(args, logger):
     elif args.optim_type == 'Adam':
         logger.info('Adam optimizer is used.')
         optimizer = torch.optim.Adam(filter(lambda x: x.requires_grad, model.module.parameters()), lr=args.lr)
+    else:
+        raise ValueError('Unknown optimizer type.')
 
     # optional restart. 
     args.start_epoch  = 0 
@@ -39,13 +39,13 @@ def get_model_and_optimizer(args, logger):
             args.start_epoch = checkpoint['epoch']
 
             model.load_state_dict(checkpoint['state_dict'])
-            classifier.load_state_dict(checkpoint['classifier1_state_dict'])
+            centroids = torch.load(checkpoint['centriods1'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             logger.info('Loaded checkpoint. [epoch {}]'.format(args.start_epoch))
         else:
             logger.info('No checkpoint found at [{}].\nStart from beginning...\n'.format(load_path))
     
-    return model, optimizer, classifier
+    return model, optimizer, centroids
 
 
 
@@ -179,17 +179,17 @@ def compute_labels(args, logger, dataloader, model, centroids, view):
 
             if (i % 200) == 0:
                 logger.info('[Assigning labels] {} / {}'.format(i, len(dataloader)))
+    # Calculate the weight of each cluster, or label.
     weight = counts / counts.sum()
 
     return weight
 
 
-def evaluate(args, logger, dataloader, classifier, model):
+def evaluate(args, logger, dataloader, centroids, model):
     logger.info('====== METRIC TEST : {} ======\n'.format(args.metric_test))
     histogram = np.zeros((args.K_test, args.K_test))
 
     model.eval()
-    classifier.eval()
     with torch.no_grad():
         for i, (_, image, label) in enumerate(dataloader):
             image = image.cuda(non_blocking=True)
@@ -204,7 +204,7 @@ def evaluate(args, logger, dataloader, classifier, model):
                 logger.info('Batch label size   : {}'.format(list(label.shape)))
                 logger.info('Batch feature size : {}\n'.format(list(feats.shape)))
 
-            probs = classifier(feats)
+            probs = batch_similarity2D(feats, centroids)
             probs = F.interpolate(probs, label.shape[-2:], mode='bilinear', align_corners=False)
             preds = probs.topk(1, dim=1)[1].view(B, -1).cpu().numpy()
             label = label.view(B, -1).cpu().numpy()
