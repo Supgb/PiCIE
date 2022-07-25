@@ -31,9 +31,9 @@ def set_logger(log_path):
     logger.addHandler(file_handler)
 
     # Logging to console
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(logging.Formatter('%(message)s'))
-    logger.addHandler(stream_handler)
+    # stream_handler = logging.StreamHandler()
+    # stream_handler.setFormatter(logging.Formatter('%(message)s'))
+    # logger.addHandler(stream_handler)
 
     return logger
 
@@ -122,10 +122,9 @@ def get_result_metrics(histogram):
 
     return result
 
-def compute_negative_euclidean(featmap, centroids, metric_function):
-    centroids = centroids.unsqueeze(-1).unsqueeze(-1)
-    return - (1 - 2*metric_function(featmap)\
-                + (centroids*centroids).sum(dim=1).unsqueeze(0)) # negative l2 squared 
+def compute_negative_euclidean(featmap, centroids):
+    return - (1 - 2*torch.einsum('nc,bchw->bnhw', centroids, featmap)\
+                + (centroids*centroids).sum(dim=1).view(centroids.shape[0],1,1)) # negative l2 squared
 
 
 def get_metric_as_conv(centroids):
@@ -148,13 +147,6 @@ def freeze_all(model):
         param.requires_grad = False 
 
 
-def initialize_classifier(args):
-    classifier = get_linear(args.in_dim, args.K_train)
-    classifier = nn.DataParallel(classifier)
-    classifier = classifier.cuda()
-
-    return classifier
-
 def get_linear(indim, outdim):
     classifier = nn.Conv2d(indim, outdim, kernel_size=1, stride=1, padding=0, bias=True)
     classifier.weight.data.normal_(0, 0.01)
@@ -172,6 +164,16 @@ def feature_flatten(feats):
             .contiguous().view(-1, feats.size(1))
     
     return feats 
+
+
+def batch_similarity2D(featmap: torch.Tensor, centroids: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the similarity between a batch of centroids and a batch of feature maps.
+     centriods: N x C
+     featmap: B x C x H x W
+     return B x N x H x W
+    """
+    return torch.einsum('bchw,nc->bnhw', featmap, centroids)
 
 ################################################################################
 #                                   Faiss related                              #
@@ -248,8 +250,8 @@ def eqv_transform_if_needed(args, dataloader, indice, input):
 
 
 def get_transform_params(args):
-    inv_list = []
-    eqv_list = []
+    inv_list = [] # photometric transformation.
+    eqv_list = [] # geometric transformation.
     if args.augment:
         if args.blur:
             inv_list.append('blur')
@@ -279,7 +281,7 @@ def collate_train(batch):
         return indice, image1, image2, label1, label2
     
     indice = [b[0] for b in batch]
-    image1 = torch.stack([b[1] for b in batch])
+    image1 = torch.stack([b[1] for b in batch])  # concatenates a sequence of tensors along the 0th dimension.
 
     return indice, image1
 

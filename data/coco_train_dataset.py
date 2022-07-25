@@ -123,7 +123,7 @@ class TrainCOCO(data.Dataset):
             image = self.random_color_saturation[ver](index, image)
         if 'hue' in self.inv_list:
             image = self.random_color_hue[ver](index, image)
-        if 'gray' in self.inv_list:
+        if 'grey' in self.inv_list:
             image = self.random_gray_scale[ver](index, image)
         if 'blur' in self.inv_list:
             image = self.random_gaussian_blur[ver](index, image)
@@ -147,7 +147,7 @@ class TrainCOCO(data.Dataset):
         N = len(self.imdb)
         
         # Base transform.
-        self.transform_base = BaseTransform(self.res2)
+        self.transform_base = BaseTransform(self.res2) # scale to res2: by default is 640.
         
         # Transforms for invariance. 
         # Color jitter (4), gray scale, blur. 
@@ -157,7 +157,7 @@ class TrainCOCO(data.Dataset):
         self.random_color_hue        = [RandomColorHue(x=0.1, p=0.8, N=N) for _ in range(2)]      # Control this later (NOTE)
         self.random_gray_scale    = [RandomGrayScale(p=0.2, N=N) for _ in range(2)]
         self.random_gaussian_blur = [RandomGaussianBlur(sigma=[.1, 2.], p=0.5, N=N) for _ in range(2)]
-
+        # Transforms for equivariance.
         self.random_horizontal_flip = RandomHorizontalTensorFlip(N=N)
         self.random_vertical_flip   = RandomVerticalFlip(N=N)
         self.random_resized_crop    = RandomResizedCrop(N=N, res=self.res1, scale=self.scale)
